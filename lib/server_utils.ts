@@ -71,7 +71,7 @@ const getOCSPURL = (cert: pkijs.Certificate) =>
   cert.extensions
     ?.find((ext) => ext.extnID === pkijs.id_AuthorityInfoAccess)
     ?.parsedValue?.accessDescriptions.find(
-      (desc) => desc.accessMethod === pkijs.id_ad_ocsp
+      (desc: any) => desc.accessMethod === pkijs.id_ad_ocsp
     )?.accessLocation?.value;
 
 const checkRevocationStatusUsingOCSP = async (

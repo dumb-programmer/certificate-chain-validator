@@ -68,7 +68,7 @@ export default function Home() {
           </div>
         }
         {
-          certificates && certificates.map(cert => <div className="mt-4 border p-4 rounded-md border-gray-300">
+          certificates && certificates.map(cert => <div key={cert.serialNumber} className="mt-4 border p-4 rounded-md border-gray-300">
             <p>
               Serial ID: {cert.serialNumber}
             </p>

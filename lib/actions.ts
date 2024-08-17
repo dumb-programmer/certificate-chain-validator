@@ -12,7 +12,6 @@ export default async function validateCertificate(data: { url: string }) {
   if (parsed.success) {
     const url = new URL(data.url);
     const domain = url.host;
-    console.log(domain);
     const certificateChain = await getCertificateChain(domain);
     const isChainValid = await validateCertificateChain(certificateChain);
 
