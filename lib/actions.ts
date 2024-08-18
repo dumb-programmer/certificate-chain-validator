@@ -4,6 +4,7 @@ import { domainFormSchema } from "./schema";
 import {
   getCertificateChain,
   getCertificateInfo,
+  parseCertificate,
   validateCertificateChain,
 } from "./server_utils";
 
@@ -14,12 +15,13 @@ export default async function validateCertificate(data: { url: string }) {
     const url = new URL(data.url);
     const domain = url.host;
     const certificateChain = await getCertificateChain(domain);
-    const isChainValid = await validateCertificateChain(certificateChain);
-
-    console.log(isChainValid);
+    const parsedCertificates = await Promise.all(
+      certificateChain.map((cert) => parseCertificate(cert))
+    );
+    const isChainValid = await validateCertificateChain(parsedCertificates);
 
     const certificates = await Promise.all(
-      certificateChain.map(async (cert) => await getCertificateInfo(cert))
+      parsedCertificates.map(async (cert) => await getCertificateInfo(cert))
     );
 
     return {

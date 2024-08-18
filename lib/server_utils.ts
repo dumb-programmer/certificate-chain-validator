@@ -4,7 +4,7 @@ import * as pkijs from "pkijs";
 import * as asn1js from "asn1js";
 import { exec } from "child_process";
 import { existsSync } from "fs";
-import { readFile } from "fs/promises";
+import { readFile, unlink, writeFile } from "fs/promises";
 import { CertificateInfo } from "./types";
 
 pkijs.setEngine("node", new pkijs.CryptoEngine({ crypto: crypto }));
@@ -24,9 +24,26 @@ const convertToDER = (cert: string) =>
     );
   });
 
+function convertCertificateToPEM(certificate: pkijs.Certificate) {
+  // Convert the certificate to DER format
+  const derCert = certificate.toSchema(true).toBER(false);
+
+  // Convert the DER to base64
+  const base64Cert = Buffer.from(derCert).toString("base64");
+
+  // Wrap with PEM headers and format with line breaks
+  const pemCert = [
+    "-----BEGIN CERTIFICATE-----",
+    ...(base64Cert.match(/.{1,64}/g) as RegExpMatchArray),
+    "-----END CERTIFICATE-----",
+  ].join("\n");
+
+  return pemCert;
+}
+
 export const getCertificateChain = async (
   domain: string
-): Promise<pkijs.Certificate[]> => {
+): Promise<string[]> => {
   return new Promise((resolve, reject) => {
     const command = `echo | openssl s_client -connect ${domain}:443 -servername ${domain} -showcerts 2>/dev/null`;
 
@@ -42,17 +59,13 @@ export const getCertificateChain = async (
         ) as RegExpMatchArray
       );
 
-      const certificates = (
-        await Promise.all(certs.map((cert) => convertToDER(cert)))
-      ).map((cert) => parseCertificate(cert));
-
-      resolve(certificates);
+      resolve(certs);
     });
   });
 };
 
-const parseCertificate = (cert: Buffer) => {
-  const asn1 = asn1js.fromBER(cert);
+export const parseCertificate = async (cert: string) => {
+  const asn1 = asn1js.fromBER(await convertToDER(cert));
   if (asn1.offset === -1) {
     throw new Error("Incorrect encoded ASN.1 data");
   }
@@ -67,6 +80,42 @@ const isValid = (cert: pkijs.Certificate) => {
   return notBefore <= today && today <= notAfter;
 };
 
+const createOCSPRequest = async (
+  issuerFilename: string,
+  certFilename: string,
+  reqFilename: string
+): Promise<0 | -1> =>
+  new Promise((resolve, reject) => {
+    exec(
+      `openssl ocsp -issuer ${issuerFilename} -cert ${certFilename} -reqout ${reqFilename}`,
+      (err, stdout, stderr) => {
+        if (err) {
+          console.log(stderr);
+          return reject(-1);
+        }
+        return resolve(0);
+      }
+    );
+  });
+
+const sendOCSPRequest = async (
+  reqFilename: string,
+  ocspURL: string,
+  respFilename: string
+): Promise<0 | -1> =>
+  new Promise((resolve, reject) => {
+    exec(
+      `curl -X POST -H "Content-Type: application/ocsp-request" --data-binary @${reqFilename} ${ocspURL} > ${respFilename}`,
+      (err, stdout, stderr) => {
+        if (err) {
+          console.log(stderr);
+          return reject(-1);
+        }
+        return resolve(0);
+      }
+    );
+  });
+
 const getOCSPURL = (cert: pkijs.Certificate) =>
   cert.extensions
     ?.find((ext) => ext.extnID === pkijs.id_AuthorityInfoAccess)
@@ -79,36 +128,68 @@ const checkRevocationStatusUsingOCSP = async (
   cert: pkijs.Certificate,
   issuerCert: pkijs.Certificate
 ) => {
-  // Create OCSP request
-  const ocspReq = new pkijs.OCSPRequest();
+  // // Create OCSP request
+  // const ocspReq = new pkijs.OCSPRequest();
 
-  await ocspReq.createForCertificate(cert, {
-    hashAlgorithm: "SHA-256",
-    issuerCertificate: issuerCert,
+  // console.log(convertCertificateToPEM(issuerCert));
+
+  // ocspReq.tbsRequest.requestorName = new pkijs.GeneralName({
+  //   type: 4,
+  //   value: cert.subject,
+  // });
+
+  // await ocspReq.createForCertificate(cert, {
+  //   hashAlgorithm: "SHA-256",
+  //   issuerCertificate: issuerCert,
+  // });
+
+  // const nonce = pkijs.getRandomValues(new Uint8Array(10));
+  // ocspReq.tbsRequest.requestExtensions = [
+  //   new pkijs.Extension({
+  //     extnID: "1.3.6.1.5.5.7.48.1.2", // nonce
+  //     extnValue: new asn1js.OctetString({ valueHex: nonce.buffer }).toBER(),
+  //   }),
+  // ];
+
+  // // Encode OCSP request
+  // const ocspReqRaw = ocspReq.toSchema(true).toBER();
+
+  // // Send OCSP Request
+  // const response = await fetch(ocspUrl, {
+  //   method: "POST",
+  //   headers: {
+  //     "Content-Type": "application/ocsp-request",
+  //   },
+  //   body: Buffer.from(ocspReqRaw),
+  // });
+
+  // if (!response.ok) {
+  //   throw new Error(`Failed to fetch OCSP response: ${response.statusText}`);
+  // }
+
+  const issuerFilename = `${crypto.randomUUID()}.pem`;
+  const certFilename = `${crypto.randomUUID()}.pem`;
+  const ocspReqFilename = `${crypto.randomUUID()}.req`;
+  const ocspRespFilename = `${crypto.randomUUID()}.resp`;
+
+  const issuerCertPEM = convertCertificateToPEM(issuerCert);
+  const certPEM = convertCertificateToPEM(cert);
+
+  await writeFile(`./${issuerFilename}`, issuerCertPEM);
+  await writeFile(`./${certFilename}`, certPEM);
+
+  // Create OCSP request using openssl
+  await createOCSPRequest(issuerFilename, certFilename, ocspReqFilename);
+
+  // Send OCSP request
+  await sendOCSPRequest(ocspReqFilename, ocspUrl, ocspRespFilename);
+
+  const ocspRespRaw = await readFile(`./${ocspRespFilename}`);
+
+  const asnOcspResp = asn1js.fromBER(Buffer.from(ocspRespRaw));
+  const ocspResp = new pkijs.OCSPResponse({
+    schema: asnOcspResp.result,
   });
-
-  // Encode OCSP request
-  const ocspReqRaw = ocspReq.toSchema(true).toBER();
-
-  // Send OCSP Request
-  const response = await fetch(ocspUrl, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/ocsp-request",
-    },
-    body: ocspReqRaw,
-  });
-
-  if (!response.ok) {
-    throw new Error(`Failed to fetch OCSP response: ${response.statusText}`);
-  }
-
-  const ocspRespRaw = await response.arrayBuffer();
-
-  const asnOcspResp = asn1js.fromBER(ocspRespRaw);
-  const ocspResp = new pkijs.OCSPResponse({ schema: asnOcspResp.result });
-
-  console.log(ocspResp.responseStatus.valueBlock.valueDec);
 
   if (!ocspResp.responseBytes) {
     throw new Error(
@@ -126,12 +207,24 @@ const checkRevocationStatusUsingOCSP = async (
   const status =
     ocspBasicResp.tbsResponseData.responses[0].certStatus.idBlock.tagNumber;
 
+  const files = [
+    issuerFilename,
+    certFilename,
+    ocspReqFilename,
+    ocspRespFilename,
+  ];
+
+  await Promise.all(files.map((filename) => unlink(`./${filename}`)));
+
   if (status === 0) {
     return false;
   }
 
   return true;
 };
+
+const isSelfSigned = (cert: pkijs.Certificate) =>
+  cert.subject.isEqual(cert.issuer);
 
 const downloadCRL = (crlUrl: string, crlFilePath: string) =>
   new Promise((resolve, reject) =>
@@ -152,8 +245,9 @@ const checkRevocationStatusUsingCRL = async (
   crlURL: string,
   cert: pkijs.Certificate
 ) => {
-  const crlFilePath = `./crls/${crlURL.split("/").pop()}`;
+  console.log(crlURL);
 
+  const crlFilePath = `./crls/${crlURL.split("/").pop()}`;
   const exists = existsSync(crlFilePath);
 
   if (!exists) {
@@ -182,10 +276,12 @@ const isRevoked = async (
   const ocspURL = getOCSPURL(cert);
 
   if (crlURL) {
+    console.log(crlURL);
     return checkRevocationStatusUsingCRL(crlURL, cert);
   }
 
   if (issuerCert && ocspURL) {
+    console.log(ocspURL);
     return checkRevocationStatusUsingOCSP(ocspURL, cert, issuerCert);
   }
 };
@@ -241,9 +337,8 @@ export const validateCertificateChain = async (
         return false;
       }
 
-      const isSelfSigned = await currentCert.verify(currentCert);
-
-      if (isSelfSigned) {
+      if (isSelfSigned(currentCert)) {
+        console.log("self-signed");
         return false;
       }
 
@@ -251,7 +346,7 @@ export const validateCertificateChain = async (
         const issuerCert = certificates[i + 1]; // next
 
         if (await isRevoked(currentCert, issuerCert)) {
-          console.log(`Certificate ${i + 1} is not revoked.`);
+          console.log(`Certificate ${i + 1} is revoked.`);
           return false;
         }
 
@@ -278,6 +373,7 @@ export const validateCertificateChain = async (
         }
       }
     } catch (err) {
+      console.log(err);
       return false;
     }
   }
