@@ -21,6 +21,7 @@ export default function Home() {
   });
   const [valid, setValid] = useState<boolean | null>(null);
   const [certificates, setCertificates] = useState<CertificateInfo[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   const isSubmitting = form.formState.isSubmitting;
 
@@ -32,6 +33,10 @@ export default function Home() {
       if (response.certificates) {
         setValid(response.valid);
         setCertificates(response.certificates);
+      }
+      else if (response.error) {
+        console.log(response.error);
+        setError(response.error);
       }
     }
   });
@@ -81,6 +86,7 @@ export default function Home() {
           </div>
           )
         }
+        {error && <p className="mt-4 text-red-500 text-sm">{error}</p>}
       </div>
     </main>
   );
