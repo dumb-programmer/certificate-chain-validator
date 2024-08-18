@@ -8,7 +8,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { Form, FormControl, FormField, FormItem, FormMessage } from "@/components/ui/form";
 import validateCertificate from "@/lib/actions";
 import { domainFormSchema } from "@/lib/schema";
-import { BadgeCheckIcon, LoaderCircleIcon } from "lucide-react";
+import { BadgeCheckIcon, CircleXIcon, LoaderCircleIcon } from "lucide-react";
 import { useState } from "react";
 import { CertificateInfo } from "@/lib/types";
 
@@ -66,10 +66,12 @@ export default function Home() {
           </form>
         </Form>
         {
-          valid !== null &&
-          <div className="mt-4 flex flex-col gap-2 justify-center items-center">
+          valid ? valid === true && <div className="mt-4 flex flex-col gap-2 justify-center items-center">
             <BadgeCheckIcon height={50} width={50} color="green" />
             <h2 className="scroll-m-20 text-xl font-semibold tracking-tight">Valid</h2>
+          </div> : valid === false && <div className="mt-4 flex flex-col gap-2 justify-center items-center">
+            <CircleXIcon height={50} width={50} color="red" />
+            <h2 className="scroll-m-20 text-xl font-semibold tracking-tight">Invalid</h2>
           </div>
         }
         {

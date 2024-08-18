@@ -240,6 +240,12 @@ export const validateCertificateChain = async (
       return false;
     }
 
+    const isSelfSigned = await currentCert.verify(currentCert);
+
+    if (isSelfSigned) {
+      return false;
+    }
+
     if (i < certificates.length - 1) {
       const issuerCert = certificates[i + 1]; // next
 

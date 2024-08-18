@@ -16,6 +16,8 @@ export default async function validateCertificate(data: { url: string }) {
       const certificateChain = await getCertificateChain(domain);
       const isChainValid = await validateCertificateChain(certificateChain);
 
+      console.log(isChainValid);
+
       const certificates = await Promise.all(
         certificateChain.map(async (cert) => await getCertificateInfo(cert))
       );
