@@ -179,14 +179,14 @@ const isRevoked = async (
   issuerCert?: pkijs.Certificate
 ) => {
   const crlURL = getCRLURL(cert);
-  const oscpURL = getOCSPURL(cert);
+  const ocspURL = getOCSPURL(cert);
 
   if (crlURL) {
     return checkRevocationStatusUsingCRL(crlURL, cert);
   }
 
-  if (issuerCert && oscpURL) {
-    return checkRevocationStatusUsingOCSP(oscpURL, cert, issuerCert);
+  if (issuerCert && ocspURL) {
+    return checkRevocationStatusUsingOCSP(ocspURL, cert, issuerCert);
   }
 };
 
@@ -235,44 +235,50 @@ export const validateCertificateChain = async (
   for (let i = 0; i < certificates.length; i++) {
     const currentCert = certificates[i];
 
-    if (!isValid(currentCert)) {
-      console.log(`Certificate ${i + 1} is not valid.`);
-      return false;
-    }
-
-    const isSelfSigned = await currentCert.verify(currentCert);
-
-    if (isSelfSigned) {
-      return false;
-    }
-
-    if (i < certificates.length - 1) {
-      const issuerCert = certificates[i + 1]; // next
-
-      if (await isRevoked(currentCert, issuerCert)) {
-        console.log(`Certificate ${i + 1} is not revoked.`);
+    try {
+      if (!isValid(currentCert)) {
+        console.log(`Certificate ${i + 1} is not valid.`);
         return false;
       }
 
-      try {
-        const isSignatureValid = await currentCert.verify(issuerCert);
+      const isSelfSigned = await currentCert.verify(currentCert);
 
-        if (!isSignatureValid) {
-          console.log(
-            `Certificate ${i + 1} is not correctly signed by its issuer.`
+      if (isSelfSigned) {
+        return false;
+      }
+
+      if (i < certificates.length - 1) {
+        const issuerCert = certificates[i + 1]; // next
+
+        if (await isRevoked(currentCert, issuerCert)) {
+          console.log(`Certificate ${i + 1} is not revoked.`);
+          return false;
+        }
+
+        try {
+          const isSignatureValid = await currentCert.verify(issuerCert);
+
+          if (!isSignatureValid) {
+            console.log(
+              `Certificate ${i + 1} is not correctly signed by its issuer.`
+            );
+            return false;
+          }
+        } catch (err) {
+          console.error(
+            `Error verifying chain at certificate ${i + 1}: ${err}`
           );
           return false;
         }
-      } catch (err) {
-        console.error(`Error verifying chain at certificate ${i + 1}: ${err}`);
-        return false;
+      } else {
+        // Check the revocation status for the root cert
+        if (await isRevoked(currentCert)) {
+          console.log(`Certificate ${i + 1} is not revoked.`);
+          return false;
+        }
       }
-    } else {
-      // Check the revocation status for the root cert
-      if (await isRevoked(currentCert)) {
-        console.log(`Certificate ${i + 1} is not revoked.`);
-        return false;
-      }
+    } catch (err) {
+      return false;
     }
   }
 
