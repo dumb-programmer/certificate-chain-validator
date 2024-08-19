@@ -247,7 +247,10 @@ const checkRevocationStatusUsingCRL = async (
 ) => {
   console.log(crlURL);
 
-  const crlFilePath = `./crls/${crlURL.split("/").pop()}`;
+  const crlFileName =
+    crlURL.split("/").pop() || crlURL.split("/")[crlURL.split("/").length - 2];
+
+  const crlFilePath = `./crls/${crlFileName}`;
   const exists = existsSync(crlFilePath);
 
   if (!exists) {
